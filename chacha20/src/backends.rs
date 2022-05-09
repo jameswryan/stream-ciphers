@@ -15,6 +15,9 @@ cfg_if! {
                 pub(crate) mod sse2;
             }
         }
+    } else if #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]{
+        pub(crate) mod soft;
+        pub(crate) mod neon;
     } else {
         pub(crate) mod soft;
     }

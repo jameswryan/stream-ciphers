@@ -106,8 +106,8 @@
     html_root_url = "https://docs.rs/chacha20/0.9.0"
 )]
 #![cfg_attr(
-    all(feature = "neon", target_arch = "aarch64", target_feature = "neon"),
-    feature(stdsimd, aarch64_target_feature)
+    all(target_arch = "aarch64", target_feature = "neon"),
+    feature(stdsimd)
 )]
 #![warn(missing_docs, rust_2018_idioms, trivial_casts, unused_qualifications)]
 #![allow(clippy::needless_range_loop)]
@@ -282,9 +282,13 @@ impl<R: Unsigned> StreamCipherCore for ChaChaCore<R> {
                         }
                     }
                 }
-            } else {
-                f.call(&mut backends::soft::Backend(self));
+        } else if #[cfg(all(target_arch = "aarch64", target_feature = "neon"))] {
+            unsafe {
+                backends::neon::inner::<R, _>(&mut self.state, f);
             }
+        } else {
+            f.call(&mut backends::soft::Backend(self));
+        }
         }
     }
 }
