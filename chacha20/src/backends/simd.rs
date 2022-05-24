@@ -11,8 +11,7 @@ use cipher::{
 };
 use core::marker::PhantomData;
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-use core::arch::aarch64::*;
+use core::simd::*;
 
 #[inline]
 #[target_feature(enable = "neon")]
@@ -21,23 +20,22 @@ where
     R: Unsigned,
     F: StreamClosure<BlockSize = U64>,
 {
-    let state_ptr = state.as_ptr();
+    let state_ptr = state.as_ptr() as *const [u32; 4];
+    let v0 = u32x4::from_array(*state_ptr.add(0));
+    let v1 = u32x4::from_array(*state_ptr.add(1));
+    let v2 = u32x4::from_array(*state_ptr.add(2));
+    let v3 = u32x4::from_array(*state_ptr.add(3));
     let mut backend = Backend::<R> {
-        v: [
-            vld1q_u32(state_ptr.add(0)),
-            vld1q_u32(state_ptr.add(4)),
-            vld1q_u32(state_ptr.add(8)),
-            vld1q_u32(state_ptr.add(12)),
-        ],
+        v: [v0, v1, v2, v3],
         _pd: PhantomData,
     };
 
     f.call(&mut backend);
-    state[12] = vgetq_lane_u32(backend.v[3], 0) as u32;
+    state[12] = backend.v[3][0];
 }
 
 pub(crate) struct Backend<R: Unsigned> {
-    v: [uint32x4_t; 4],
+    v: [u32x4; 4],
     _pd: PhantomData<R>,
 }
 
@@ -57,11 +55,12 @@ impl<R: Unsigned> StreamBackend for Backend<R> {
             let res = rounds::<R>(&self.v);
 
             // Increment counter
-            self.v[3] = vaddw_u16(self.v[3], vcreate_u16(1u64));
+            self.v[3][0] += 1;
 
-            let block_ptr = block.as_mut_ptr() as *mut u32;
+            // Copy res into block
+            let block_ptr = block.as_mut_ptr() as *mut [u32; 4];
             for i in 0..4 {
-                vst1q_u32(block_ptr.add(4 * i), res[i]);
+                *block_ptr.add(i) = res[i].to_array();
             }
         }
     }
@@ -69,21 +68,21 @@ impl<R: Unsigned> StreamBackend for Backend<R> {
 
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn rounds<R: Unsigned>(v: &[uint32x4_t; 4]) -> [uint32x4_t; 4] {
+unsafe fn rounds<R: Unsigned>(v: &[u32x4; 4]) -> [u32x4; 4] {
     let mut res = *v;
     for _ in 0..R::USIZE {
         double_quarter_round(&mut res);
     }
 
     for i in 0..4 {
-        res[i] = vaddq_u32(res[i], v[i]);
+        res[i] += v[i];
     }
     res
 }
 
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn double_quarter_round(v: &mut [uint32x4_t; 4]) {
+unsafe fn double_quarter_round(v: &mut [u32x4; 4]) {
     // Column round
     add_xor_rot(v);
 
@@ -131,11 +130,13 @@ unsafe fn double_quarter_round(v: &mut [uint32x4_t; 4]) {
 ///
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn shuffle([a, _, c, d]: &mut [uint32x4_t; 4]) {
-    // c >>>= 32; d >>>= 64; a >>>= 96;
-    *c = vextq_u32(*c, *c, 1);
-    *d = vextq_u32(*d, *d, 2);
-    *a = vextq_u32(*a, *a, 3);
+unsafe fn shuffle([a, _, c, d]: &mut [u32x4; 4]) {
+    // c >>>= 32;
+    *c = c.rotate_lanes_right::<3>();
+    // d >>>= 64;
+    *d = d.rotate_lanes_right::<2>();
+    // a >>>= 96;
+    *a = a.rotate_lanes_right::<1>();
 }
 
 /// Undo the shuffle operation.
@@ -156,33 +157,43 @@ unsafe fn shuffle([a, _, c, d]: &mut [uint32x4_t; 4]) {
 /// ```
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn deshuffle([a, _, c, d]: &mut [uint32x4_t; 4]) {
-    // c <<<= 32; d <<<= 64; a <<<= 96;
-    *c = vextq_u32(*c, *c, 3);
-    *d = vextq_u32(*d, *d, 2);
-    *a = vextq_u32(*a, *a, 1);
+unsafe fn deshuffle([a, _, c, d]: &mut [u32x4; 4]) {
+    // c <<<= 32;
+    *c = c.rotate_lanes_left::<3>();
+    // d <<<= 64;
+    *d = d.rotate_lanes_left::<2>();
+    // a <<<= 96;
+    *a = a.rotate_lanes_left::<1>();
 }
 
 #[inline]
 #[target_feature(enable = "neon")]
-unsafe fn add_xor_rot([a, b, c, d]: &mut [uint32x4_t; 4]) {
+unsafe fn add_xor_rot([a, b, c, d]: &mut [u32x4; 4]) {
     // a += b; d ^= a; d <<<= (16, 16, 16, 16);
-    *a = vaddq_u32(*a, *b);
-    *d = veorq_u32(*d, *a);
-    *d = veorq_u32(vshlq_n_u32(*d, 16), vshrq_n_u32(*d, 16));
+    *a += *b;
+    *d ^= *a;
+    for i in 0..4 {
+        d[i] = d[i].rotate_left(16);
+    }
 
     // c += d; b ^= c; b <<<= (12, 12, 12, 12);
-    *c = vaddq_u32(*c, *d);
-    *b = veorq_u32(*b, *c);
-    *b = veorq_u32(vshlq_n_u32(*b, 12), vshrq_n_u32(*b, 20));
+    *c += *d;
+    *b ^= *c;
+    for i in 0..4 {
+        b[i] = b[i].rotate_left(12);
+    }
 
     // a += b; d ^= a; d <<<= (8, 8, 8, 8);
-    *a = vaddq_u32(*a, *b);
-    *d = veorq_u32(*d, *a);
-    *d = veorq_u32(vshlq_n_u32(*d, 8), vshrq_n_u32(*d, 24));
+    *a += *b;
+    *d ^= *a;
+    for i in 0..4 {
+        d[i] = d[i].rotate_left(8);
+    }
 
     // c += d; b ^= c; b <<<= (7, 7, 7, 7);
-    *c = vaddq_u32(*c, *d);
-    *b = veorq_u32(*b, *c);
-    *b = veorq_u32(vshlq_n_u32(*b, 7), vshrq_n_u32(*b, 25));
+    *c += *d;
+    *b ^= *c;
+    for i in 0..4 {
+        b[i] = b[i].rotate_left(7);
+    }
 }
