@@ -14,7 +14,6 @@ use core::marker::PhantomData;
 use core::simd::*;
 
 #[inline]
-#[target_feature(enable = "neon")]
 pub(crate) unsafe fn inner<R, F>(state: &mut [u32; STATE_WORDS], f: F)
 where
     R: Unsigned,
@@ -67,7 +66,6 @@ impl<R: Unsigned> StreamBackend for Backend<R> {
 }
 
 #[inline]
-#[target_feature(enable = "neon")]
 unsafe fn rounds<R: Unsigned>(v: &[u32x4; 4]) -> [u32x4; 4] {
     let mut res = *v;
     for _ in 0..R::USIZE {
@@ -81,7 +79,6 @@ unsafe fn rounds<R: Unsigned>(v: &[u32x4; 4]) -> [u32x4; 4] {
 }
 
 #[inline]
-#[target_feature(enable = "neon")]
 unsafe fn double_quarter_round(v: &mut [u32x4; 4]) {
     // Column round
     add_xor_rot(v);
@@ -129,7 +126,6 @@ unsafe fn double_quarter_round(v: &mut [u32x4; 4]) {
 /// - https://github.com/floodyberry/chacha-opt/blob/0ab65cb99f5016633b652edebaf3691ceb4ff753/chacha_blocks_ssse3-64.S#L639-L643
 ///
 #[inline]
-#[target_feature(enable = "neon")]
 unsafe fn shuffle([a, _, c, d]: &mut [u32x4; 4]) {
     // c >>>= 32;
     *c = c.rotate_lanes_right::<3>();
@@ -156,7 +152,6 @@ unsafe fn shuffle([a, _, c, d]: &mut [u32x4; 4]) {
 /// [d0, d1, d2, d3]    [12, 13, 14, 15]
 /// ```
 #[inline]
-#[target_feature(enable = "neon")]
 unsafe fn deshuffle([a, _, c, d]: &mut [u32x4; 4]) {
     // c <<<= 32;
     *c = c.rotate_lanes_left::<3>();
@@ -167,7 +162,6 @@ unsafe fn deshuffle([a, _, c, d]: &mut [u32x4; 4]) {
 }
 
 #[inline]
-#[target_feature(enable = "neon")]
 unsafe fn add_xor_rot([a, b, c, d]: &mut [u32x4; 4]) {
     // a += b; d ^= a; d <<<= (16, 16, 16, 16);
     *a += *b;
