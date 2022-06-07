@@ -106,12 +106,8 @@
     html_root_url = "https://docs.rs/chacha20/0.9.0"
 )]
 #![cfg_attr(
-    any(
-        all(target_arch = "aarch64", target_feature = "neon"),
-        target_arch = "x86",
-        target_arch = "x86_64"
-    ),
-    feature(portable_simd)
+    all(target_arch = "aarch64", target_feature = "neon"),
+    feature(stdsimd)
 )]
 #![warn(missing_docs, rust_2018_idioms, trivial_casts, unused_qualifications)]
 #![allow(clippy::needless_range_loop)]
