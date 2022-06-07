@@ -16,6 +16,10 @@ categories = ["cryptography", "no-std"]
 cfg-if = "1"
 cipher = "0.4.2"
 
+[target.'cfg(any(target_arch = "x86",target_arch = "x86_64"))'.dependencies]
+cpufeatures = "0.2"
+
+
 [dev-dependencies]
 cipher = { version = "0.4.2", features = ["dev"] }
 hex-literal = "0.3.3"

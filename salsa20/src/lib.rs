@@ -125,10 +125,33 @@ const CONSTANTS: [u32; 4] = [0x6170_7865, 0x3320_646e, 0x7962_2d32, 0x6b20_6574]
 /// Block type used by all Salsa variants
 type Block = GenericArray<u8, U64>;
 
+cfg_if! {
+    if #[cfg(chacha20_force_soft)] {
+        type Tokens = ();
+    } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+        cfg_if! {
+            if #[cfg(chacha20_force_sse2)] {
+                #[cfg(not(target_feature = "sse2"))]
+                compile_error!("You must enable `sse2` target feature with \
+                `chacha20_force_sse2` configuration option");
+                type Tokens = ();
+            } else {
+                cpufeatures::new!(sse2_cpuid, "sse2");
+                type Tokens = sse2_cpuid::InitToken;
+            }
+        }
+    } else {
+        type Tokens = ();
+    }
+}
+
 /// The Salsa20 core function.
 pub struct SalsaCore<R: Unsigned> {
     /// Internal state of the core function
     state: [u32; STATE_WORDS],
+    /// CPU target feature tokens
+    #[allow(dead_code)]
+    tokens: Tokens,
     /// Number of rounds to perform
     rounds: PhantomData<R>,
 }
@@ -141,6 +164,7 @@ impl<R: Unsigned> SalsaCore<R> {
     pub fn from_raw_state(state: [u32; STATE_WORDS]) -> Self {
         Self {
             state,
+            tokens: get_tokens().unwrap(),
             rounds: PhantomData,
         }
     }
@@ -185,6 +209,7 @@ impl<R: Unsigned> KeyIvInit for SalsaCore<R> {
 
         Self {
             state,
+            tokens: get_tokens().unwrap(),
             rounds: PhantomData,
         }
     }
@@ -201,12 +226,21 @@ impl<R: Unsigned> StreamCipherCore for SalsaCore<R> {
             if #[cfg(salsa20_force_soft)] {
                 f.call(&mut backends::soft::Backend(self));
             } else if #[cfg(all(target_arch = "aarch64", target_feature = "neon"))] {
-            unsafe {
-                backends::neon::inner::<R, _>(&mut self.state, f);
+                unsafe {
+                    backends::neon::inner::<R, _>(&mut self.state, f);
+                }
+            } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+                unsafe {
+                    let sse2_token = self.tokens;
+                    if sse2_token.get() {
+                        backends::sse2::inner::<R, _>(&mut self.state, f);
+                    } else {
+                        f.call(&mut backends::soft::Backend(self));
+                    }
+                }
+            } else {
+                f.call(&mut backends::soft::Backend(self));
             }
-        } else {
-            f.call(&mut backends::soft::Backend(self));
-        }
         }
     }
 }
@@ -224,6 +258,25 @@ impl<R: Unsigned> StreamCipherSeekCore for SalsaCore<R> {
         self.state[8] = (pos & 0xffff_ffff) as u32;
         self.state[9] = ((pos >> 32) & 0xffff_ffff) as u32;
     }
+}
+
+/// Helper function to initialize cpufeature tokens
+#[inline]
+fn get_tokens() -> Option<Tokens> {
+    cfg_if! {
+        if #[cfg(salsa20_force_soft)] {
+            let tokens = None;
+        } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+            cfg_if! {
+                if #[cfg(salsa20_force_see2)] {
+                    let tokens = None;
+                } else {
+                    let tokens = Some(sse2_cpuid::init());
+                }
+            }
+        }
+    }
+    tokens
 }
 
 #[cfg(feature = "zeroize")]
