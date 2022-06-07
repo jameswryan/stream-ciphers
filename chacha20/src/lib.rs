@@ -261,12 +261,9 @@ impl<R: Unsigned> StreamCipherCore for ChaChaCore<R> {
         cfg_if! {
             if #[cfg(chacha20_force_soft)] {
                 f.call(&mut backends::soft::Backend(self));
-            } else if #[cfg(any(
-                            all(target_arch = "aarch64", target_feature = "neon"),
-                            target_arch = "x86",
-                            target_arch = "x86_64" ))] {
+            } else if #[cfg(all(target_arch = "aarch64", target_feature = "neon"))] {
                 unsafe {
-                    backends::simd::inner::<R, _>(&mut self.state, f);
+                    backends::neon::inner::<R, _>(&mut self.state, f);
                 }
             } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
                 cfg_if! {
