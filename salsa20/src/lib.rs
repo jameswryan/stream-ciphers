@@ -70,10 +70,6 @@
     html_favicon_url = "https://raw.githubusercontent.com/RustCrypto/media/8f1a9894/logo.svg",
     html_root_url = "https://docs.rs/salsa20/0.10.2"
 )]
-#![cfg_attr(
-    all(target_arch = "aarch64", target_feature = "neon"),
-    feature(stdsimd)
-)]
 #![warn(missing_docs, rust_2018_idioms, trivial_casts, unused_qualifications)]
 
 pub use cipher;
@@ -164,7 +160,7 @@ impl<R: Unsigned> SalsaCore<R> {
     pub fn from_raw_state(state: [u32; STATE_WORDS]) -> Self {
         Self {
             state,
-            tokens: get_tokens().unwrap(),
+            tokens: get_tokens(),
             rounds: PhantomData,
         }
     }
@@ -209,7 +205,7 @@ impl<R: Unsigned> KeyIvInit for SalsaCore<R> {
 
         Self {
             state,
-            tokens: get_tokens().unwrap(),
+            tokens: get_tokens(),
             rounds: PhantomData,
         }
     }
@@ -262,21 +258,22 @@ impl<R: Unsigned> StreamCipherSeekCore for SalsaCore<R> {
 
 /// Helper function to initialize cpufeature tokens
 #[inline]
-fn get_tokens() -> Option<Tokens> {
+fn get_tokens() -> Tokens {
     cfg_if! {
         if #[cfg(salsa20_force_soft)] {
-            let tokens = None;
+            ()
         } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
             cfg_if! {
-                if #[cfg(salsa20_force_see2)] {
-                    let tokens = None;
+                if #[cfg(salsa20_force_sse2)] {
+                    ()
                 } else {
-                    let tokens = Some(sse2_cpuid::init());
+                    sse2_cpuid::init()
                 }
             }
+        } else {
+            ()
         }
     }
-    tokens
 }
 
 #[cfg(feature = "zeroize")]
