@@ -122,14 +122,14 @@ const CONSTANTS: [u32; 4] = [0x6170_7865, 0x3320_646e, 0x7962_2d32, 0x6b20_6574]
 type Block = GenericArray<u8, U64>;
 
 cfg_if! {
-    if #[cfg(chacha20_force_soft)] {
+    if #[cfg(salsa20_force_soft)] {
         type Tokens = ();
     } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
         cfg_if! {
-            if #[cfg(chacha20_force_sse2)] {
+            if #[cfg(salsa20_force_sse2)] {
                 #[cfg(not(target_feature = "sse2"))]
                 compile_error!("You must enable `sse2` target feature with \
-                `chacha20_force_sse2` configuration option");
+                `salsa20_force_sse2` configuration option");
                 type Tokens = ();
             } else {
                 cpufeatures::new!(sse2_cpuid, "sse2");
@@ -226,12 +226,20 @@ impl<R: Unsigned> StreamCipherCore for SalsaCore<R> {
                     backends::neon::inner::<R, _>(&mut self.state, f);
                 }
             } else if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
-                unsafe {
-                    let sse2_token = self.tokens;
-                    if sse2_token.get() {
-                        backends::sse2::inner::<R, _>(&mut self.state, f);
+                cfg_if! {
+                    if #[cfg(salsa20_force_sse2)] {
+                        unsafe{
+                            backends::sse2::inner::<R, _>(&mut self.state, f);
+                        }
                     } else {
-                        f.call(&mut backends::soft::Backend(self));
+                        unsafe {
+                            let sse2_token = self.tokens;
+                            if sse2_token.get() {
+                                backends::sse2::inner::<R, _>(&mut self.state, f);
+                            } else {
+                                f.call(&mut backends::soft::Backend(self));
+                            }
+                        }
                     }
                 }
             } else {
