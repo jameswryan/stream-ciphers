@@ -31,7 +31,8 @@ where
     f.call(&mut backend);
 
     let c = _mm_cvtsi128_si64(backend.v[2]) as u64;
-    [state[8], state[9]] = [(c & 0xffff_ffff) as u32, ((c >> 32) & 0xffff_ffff) as u32];
+    state[8] = (c & 0xffff_ffff) as u32;
+    state[9] = ((c >> 32) & 0xffff_ffff) as u32;
 }
 
 struct Backend<R: Unsigned> {
