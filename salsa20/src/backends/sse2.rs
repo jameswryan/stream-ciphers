@@ -58,6 +58,7 @@ impl<R: Unsigned> StreamBackend for Backend<R> {
             self.v[2] = _mm_add_epi64(self.v[2], _mm_set_epi64x(0, 1));
 
             let block_ptr = block.as_mut_ptr() as *mut __m128i;
+            #[allow(clippy::needless_range_loop)]
             for i in 0..4 {
                 _mm_storeu_si128(block_ptr.add(i), res[i]);
             }
